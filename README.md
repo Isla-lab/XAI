@@ -1,13 +1,3 @@
-## DESCRIPTION ##
-Code for the paper:
-@inproceedings{meli2024causal_anomaly,
-  title={Explainable Online Unsupervised Anomaly Detection for Cyber-Physical Systems via Causal Discovery from Time Series},
-  author={Meli, Daniele},
-  booktitle={IEEE 20th International Conference on Automation Science and Engineering (CASE)},
-  year={2024 (in publication)},
-  organization={IEEE}
-}
-
 ## REQUIREMENTS ##
 1. Python 3.10
 2. https://github.com/jakobrunge/tigramite
