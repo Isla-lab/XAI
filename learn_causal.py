@@ -32,11 +32,8 @@ def read_preprocess_data(path):
 
 # Executes the PCMCI causal discovery algorithm
 def run_pcmci(data, delay):
-    data = np.nan_to_num(data)
-    pcmci = PCMCI(dataframe=pp.DataFrame(data), cond_ind_test=ParCorr())
-    results = pcmci.run_pcmci(tau_max=delay, pc_alpha=ALPHA)
-
-    return results
+    #TODO: implement PCMCI
+    pass
 
 
 
@@ -74,19 +71,19 @@ def main():
             sorted_freq = [s for s in sorted_freq if s <= max_freq]
             break
 
-    #aubsample and filter, and remove nearly constant variables 
+    #aubsample and filter 
     normal_data.values[0] = normal_data.values[0][::max(1, int(np.floor(1/10/max_freq))), :]
-    nonconst = [idx for idx in range(np.shape(normal_data.values[0])[1]) if np.std(normal_data.values[0][:, idx]) > 0.01 * np.mean(normal_data.values[0][:, idx])]
-    nonconst_data = normal_data.values[0][:, nonconst]
-    for j in range(np.shape(nonconst_data)[1]):
-        nonconst_data[:,j] /= (np.max(nonconst_data[:,j]) - np.min(nonconst_data[:,j])) + np.min(nonconst_data[:,j])
+    
+    # TODO: remove nearly constant time series: i.e., time series whose standard deviation is lower than 1% of the mean
+    nonconst_data = normal_data.values[0]
+    nonconst = list(range(0, np.shape(nonconst_data)[1]))
     
     #learn causal model
-    delay = int(np.floor(max_freq / np.mean(np.unique(sorted_freq))))
+    max_delay = int(np.floor(max_freq / np.mean(np.unique(sorted_freq))))
     start = time.time()
-    normal_links = run_pcmci(nonconst_data, delay)
+    results = run_pcmci(nonconst_data, max_delay)
     elapsed = time.time() - start
-    np.savez("models/pepper_normal_07", val_matrix=normal_links["val_matrix"], p_matrix=normal_links["p_matrix"], var=columns, subsample=max(1, int(np.floor(1/10/max_freq))), nonconst=nonconst, time=elapsed)
+    np.savez("models/pepper_normal_07", val_matrix=results["val_matrix"], p_matrix=results["p_matrix"], var=columns, subsample=max(1, int(np.floor(1/10/max_freq))), nonconst=nonconst, time=elapsed)
 
 
       

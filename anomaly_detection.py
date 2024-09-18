@@ -88,7 +88,7 @@ attack_dfs.append(read_preprocess_data("data/pepper_csv/LedsControl.csv"))
 # plt.show()
 #PLOT CAUSAL GRAPH
 
-#save normal coeffs
+#compute normal coeffs
 normal_data = normal_df.values[:int(TRAINING_FRAC*np.shape(normal_df.values)[0]), :]
 normal_data = normal_data[::subsample, nonconst]
 normal_data = np.nan_to_num(normal_data)
@@ -96,17 +96,10 @@ normal_data_full = normal_df.values
 normal_data_full = normal_data_full[::subsample, nonconst]
 normal_data_full = np.nan_to_num(normal_data_full)
 indices = np.array(np.where(normal_matrix != 0))
-fine_coeffs = dict()
+causal_coeffs = dict()
 for var in np.unique(indices[1,:]):
-    var_indices = [indices[:,k] for k in range(np.shape(indices)[1]) if indices[1,k] == var]
-    var_indices.sort(key= lambda a : a[-1])
-    stack_list = []
-    max_delay = var_indices[-1][2]
-    for el in var_indices:
-        stack_list.append(normal_data[max_delay-el[2] : np.shape(normal_data)[0]-el[2], el[0]])
-    stack_list.append(np.ones(np.shape(normal_data)[0]-max_delay))
-    coeffs = np.linalg.lstsq(np.column_stack(stack_list), normal_data[max_delay:, var])[0][:-1]
-    fine_coeffs[var] = coeffs
+    #TODO: compute linear coeffs from normal_data (i.e., TRAINING_FRAC of the dataset) via lstsq (least squares)
+    pass
 
 
 #NORMAL OUAD
@@ -127,7 +120,7 @@ for j in range(0, max_time):
         coeffs = np.linalg.lstsq(np.column_stack(stack_list), normal_data_full[max_delay : j+np.shape(normal_matrix)[2], var])[0][:-1]
         if var not in err.keys():
             err[var] = np.zeros((max_time, len(var_indices)))
-        err[var][j, :] = (coeffs - fine_coeffs[var])
+        err[var][j, :] = (coeffs - causal_coeffs[var])
         norm_agg[j,i] = np.linalg.norm(err[var][j, :])
 
 indices_error = []
@@ -156,7 +149,7 @@ for q in range(len(attack_dfs)):
         for i in range(len(np.unique(indices[1,:]))):    
             var = np.unique(indices[1,:])[i]
             var_indices = [indices[:,k] for k in range(np.shape(indices)[1]) if indices[1,k] == var]
-            var_indices.sort(key= lambda a : a[-1])
+            # var_indices.sort(key= lambda a : a[-1])
             max_delay = var_indices[-1][2]
             start_time = time.time()
             stack_list = []
@@ -166,7 +159,7 @@ for q in range(len(attack_dfs)):
             coeffs = np.linalg.lstsq(np.column_stack(stack_list), attack_data[max_delay : j+np.shape(normal_matrix)[2], var])[0][:-1]
             if var not in err_attack.keys():
                 err_attack[var] = np.zeros((max_time, len(var_indices)))
-            err_attack[var][j, :] = (coeffs - fine_coeffs[var])
+            err_attack[var][j, :] = (coeffs - causal_coeffs[var])
             norm_agg[j,i] = np.linalg.norm(err_attack[var][j, :])
 
     start_index = 0
