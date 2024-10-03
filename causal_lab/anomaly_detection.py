@@ -95,10 +95,10 @@ normal_data = np.nan_to_num(normal_data)
 normal_data_full = normal_df.values
 normal_data_full = normal_data_full[::subsample, nonconst]
 normal_data_full = np.nan_to_num(normal_data_full)
-indices = np.array(np.where(normal_matrix != 0))
-causal_coeffs = dict()
+indices = np.array(np.where(normal_matrix != 0)) # where the causal links are relevant
+causal_coeffs = dict() #for each variable key, store linear coeffs
 for var in np.unique(indices[1,:]):
-    #TODO: compute linear coeffs from normal_data (i.e., TRAINING_FRAC of the dataset) via lstsq (least squares)
+    #TODO: compute causal_coeffs from normal_data (i.e., TRAINING_FRAC of the dataset) via lstsq (least squares)
     pass
 
 
