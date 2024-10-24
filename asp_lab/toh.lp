@@ -1,8 +1,9 @@
 #include<incmode>.
 
-#defined move/3.
-
-#program base.
+peg(a;b;c).
+disk(1..4).
+init_on(1..4,a).
+goal_on(1..4,c).
 on(D,P,0) :- init_on(D,P).
 
 #program check(t).
