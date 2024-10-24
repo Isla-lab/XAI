@@ -1,4 +1,4 @@
-#include<incmode>
+#include<incmode>.
 
 #defined move/3.
 
