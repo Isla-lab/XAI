@@ -18,7 +18,7 @@ at((0,0), 1). %location (0,0) at time 1
 
 
 #program step(t).
-%TO BE COMPLETED (action preconditions as aggregates, effects and constraints...)
+%TO BE COMPLETED (action preconditions as aggregates; effects and constraints...)
 %possible actions are east/north/south/west(t) + sample(R, t)
 
 

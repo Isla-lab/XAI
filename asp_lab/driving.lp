@@ -22,7 +22,7 @@ start(4,8).
 start(5,8).
 
 
-time(1..10).    
+% time(1..10).    
 
 % Goal cell
 goal_pos(4,4).
@@ -90,6 +90,7 @@ crossroad(4,6).
 crossroad(5,6).
 
 % pedestrians moving in the environment
+% ped_pos(X,Y,t)
 ped_pos(0, 2, 1).
 ped_pos(1, 2, 2).
 ped_pos(1, 3, 3).
@@ -114,7 +115,7 @@ ped_pos(7, 8, 10).
 
 
 % random starting position
-1 { agent_pos(X, Y, 1) : coord(X), coord(Y), start(X, Y) } 1.
+1 { agent_pos(X, Y, 1) : start(X, Y) } 1.
 
 #program step(t).
 %TO BE COMPLETED (action preconditions as aggregates, effects and constraints...)
@@ -129,6 +130,6 @@ at_goal(t) :- goal_pos(X,Y), agent_pos(X,Y,t).
 :- not at_goal(t), query(t).
 
 % output
-#show agent_pos/3.
+% #show agent_pos/3.
 #show move_fast/2.
 #show move_slow/2.
