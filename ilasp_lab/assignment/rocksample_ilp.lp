@@ -31,7 +31,7 @@ guess(3,10).
 
 #program check(t).
 %:- query(t), t<2.
-:- query(t), not sampled(R,t), target_sample(R).
+:- query(t), not sampled(R,t), good(R).
 
 
 
