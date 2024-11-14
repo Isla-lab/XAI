@@ -1,7 +1,7 @@
 % background knowledge:
 
-rocks(0.3). %ids of rocks
-ranges_dist(0.24). %12x12 grid
+rocks(0..3). %ids of rocks
+ranges_dist(0..24). %12x12 grid
 guess_value(0). %possible probabilities of goodness of rocks
 guess_value(10).
 guess_value(20).
