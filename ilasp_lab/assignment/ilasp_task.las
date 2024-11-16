@@ -8516,23 +8516,26 @@ guess_value(100).
 
 
 
-% Modebias: 
+% Mode bias: 
 
-%main atom for head: good (use aggregate)
-%main atoms for body: guess(rocks, guess_value); dist(rocks, ranges_dist);
-%use (positive) flag and remove constraints from search space
-%max rule length = 6, max body length = 4
+%main atom for head: good (use aggregate, one or no rock can be selected per time)
+%main atoms for body: 
+%guess(rocks, guess_value) := the rock is good with probability guess_value;
+%dist(rocks, ranges_dist) := Manhattan distance to the rock is ranges_dist;
+
+%distance and guess MAKE NO SENSE without specifying the ranges for ranges_dist and guess_value
 %it is possible to introduce arithmetic comparison in body
-
 %#constant(const_value, 0).
 %#constant(const_value, 1).
 %#constant(const_value, 2).
 %#modeb(1, var(value) < const(const_value))
 
-%this will generate body atoms as V < 0, V < 1, ..
-%We expect rule which state: select a rock with distance less than.. and value higher than.. Define the search space accordingly
-%You will still have to clean the search space
-%0{good(R) : dist(R,V)}1. is meaningless..
+%You will have to generate the search space: max body length=4; no constraints
+%ILASP --version=4 --max-rule-length=6 -ml=4 -nc -s ilasp_task.las >> s_m.txt
+%Then make a Python script to clean useless rules
+%Then copy paste the pruned s_m here and run
+%ILASP --version=4 -d ilasp_task.las
+%Finally pick the hypothesis with the least counterexamples (the one ABOVE the number of counterexamples)
 
 #maxv(3). %maximum number of variables per rule
-#maxhl(1). %maximum length of aggregate axioms. This will generate both 0{}1 and 1{}1, but we are interested only in 0{}1.
+#maxhl(1). %maximum length of aggregate axioms. This will generate both 0{}1 and 1{}1.
