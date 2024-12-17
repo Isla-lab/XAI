@@ -288,10 +288,19 @@ class SR_DQN(OffPolicyAlgorithm):
 
     def _get_suggested_action(self, observed_img) -> List[int]:
         observables = self._get_observables(observed_img)
+        # Observables returned as an array of tuples,
+        # each containing the string representing the name of the predicate and an array of arguments:
+        #  ("key", [color, offset_x, offset_y]), where offset_x, offset_y represent the relative distance wrt the agent
+        #  ("door", [color, offset_x, offset_y])
+        #  ("wall", [offset_x, offset_y])
+        #  ("goal", [offset_x, offset_y])
+        #  ("carryingKey", [color])
+        #  (door_state, [color]), where door_state can be 'open', 'closed', or 'locked'
+
         actions = [] # POPULATE THE SET WITH THE ACTIONS SUGGESTED BY THE RULES
         # Remember to map the high-level rules below to the actions implemented in the environment!
-        #   pickup(X) :- key(X), samecolor(X,Y), door(Y), notcarrying
-        #   open(X) :- door(X), locked(X), key(Z), carrying(Z), samecolor(X,Z)
+        #   pickup(X) :- key(X), samecolor(X,Y), door(Y), notcarrying       Hint: must predicates (e.g. samecolor(X,Y)) must be derived!
+        #   open(X) :- door(X), locked(X), key(Z), carryingKey(Z), samecolor(X,Z)
         #   goto :- goal(X), unlocked
         # You can check the environment actions here: https://minigrid.farama.org/environments/minigrid/DoorKeyEnv/#action-space
         # Hint: the actions marked as 'unused' are, in fact, useless, but the agent could still perform them
@@ -299,12 +308,26 @@ class SR_DQN(OffPolicyAlgorithm):
         return random.choices(list(range(self.env.action_space.n)), weights, k=1) 
     
     def _get_observables(self, img):
-        # This method must generate observables (e.g. samecolor(X,Y)) from the raw observation.
-        # Here you can find some useful mappings from raw observation indexes to strings that you can import: 
-        # https://github.com/Farama-Foundation/Minigrid/blob/master/minigrid/core/constants.py
-        # https://minigrid.farama.org/environments/minigrid/DoorKeyEnv/#observation-encoding
-        view_size = 7 # the agent can view a 7x7 window in front of it, if no walls are present
-        observation = np.asarray(img[0]).reshape((view_size, view_size, 3))
-        # The observation is shaped as a multidimensional array, 
-        # each tile of the grid is represented as a triplet (see slides for the indexing)
-        return ''
+        import numpy as np
+        from minigrid.core.constants import IDX_TO_COLOR
+        DOOR_STATES = ['open', 'closed', 'locked']
+        obs = []
+        view_size = 7
+        img = np.asarray(img[0]).reshape((view_size,view_size,3))
+        for i in range(view_size):
+            for j in range(view_size):
+                item = img[i][j]
+                offset_x = i - int((view_size - 1)/2)
+                offset_y = abs(j - (view_size - 1))
+                if item[0] == 5:
+                    obs.append(("key", [IDX_TO_COLOR.get(item[1]), offset_x, offset_y]))
+                    if i == ((view_size - 1)/2) and j == (view_size - 1):
+                        obs.append(("carryingKey", [IDX_TO_COLOR.get(item[1])]))
+                elif item[0] == 4:
+                    obs.append(("door", [IDX_TO_COLOR.get(item[1]), offset_x, offset_y]))
+                    obs.append((f"{DOOR_STATES[2]}", [IDX_TO_COLOR.get(item[1])]))
+                elif item[0] == 8:
+                    obs.append(("goal", [offset_x, offset_y]))
+                elif item[0] == 2:
+                    obs.append(("wall", [offset_x, offset_y]))
+        return obs
