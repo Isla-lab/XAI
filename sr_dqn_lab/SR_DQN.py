@@ -302,8 +302,9 @@ class SR_DQN(OffPolicyAlgorithm):
         # This method must generate observables (e.g. samecolor(X,Y)) from the raw observation.
         # Here you can find some useful mappings from raw observation indexes to strings that you can import: 
         # https://github.com/Farama-Foundation/Minigrid/blob/master/minigrid/core/constants.py
-        # The raw observation is a flattened array that represents the tiles of the grid included in the agent view.
-        # We suggest you to to reshape the array to go back to the (7, 7, 3) shape described here: 
         # https://minigrid.farama.org/environments/minigrid/DoorKeyEnv/#observation-encoding
-        view_size = 7 # the agent can view a 7x7 window in front of it, if no walls are present (see slides)
+        view_size = 7 # the agent can view a 7x7 window in front of it, if no walls are present
+        observation = np.asarray(img[0]).reshape((view_size, view_size, 3))
+        # The observation is shaped as a multidimensional array, 
+        # each tile of the grid is represented as a triplet (see slides for the indexing)
         return ''
