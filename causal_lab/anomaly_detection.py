@@ -1,211 +1,346 @@
-import time
-import pandas as pd
-import numpy as np
+"""
+==============================================================
+ Causal Discovery & Anomaly Detection (Tigramite)
+==============================================================
+
+Workflow:
+1. Data Loading
+2. Causal Model Learning (offline PCMCI)
+3. Offline Coefficient Estimation
+4. Online Monitoring (moving-window coefficient updates)
+5. Anomaly Detection
+6. Metrics Computation
+
+Author: (your name)
+==============================================================
+"""
+
+# ================== IMPORTS ==================
 import os
-
-from tigramite import plotting as tp
-from matplotlib import pyplot as plt
-
+import numpy as np
+import pandas as pd
+import warnings
 from tigramite import data_processing as pp
 from tigramite.pcmci import PCMCI
 from tigramite.independence_tests.parcorr import ParCorr
-
-import time
-
-import warnings
 from scipy.stats import ConstantInputWarning
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore', category=ConstantInputWarning)
 
-# Constants
-ALPHA = 0.05 # Significance level for ParCorr
-TRAINING_FRAC = 0.7 # Fraction of the dataset to use for training
+# ================== GLOBAL CONFIG ==================
+ALPHA = 0.05
+TRAINING_FRAC = 0.7
+PREFIX = "C:\\Users\\User\\tigramite\\tigramite\\tutorials\\causal_discovery\\"
+TASK = "pepper"
 
+# ================================================================
+#                         DATA LOADING
+# ================================================================
+def read_data(path: str, task: str) -> pd.DataFrame:
+    """
+    Load CSV data, handle timestamp indexing.
 
-
-def read_preprocess_data(path):
-    df = pd.read_csv(path, delimiter=",")
-    df['Timestamp'] = df['timestamp']
-    df.set_index('Timestamp', inplace=True)
-    columns_to_drop = ['timestamp']
-    df.drop(columns=[col for col in columns_to_drop if col in df.columns or col == df.columns[0]], inplace=True)
+    Visual:
+        CSV -> DataFrame indexed by Timestamp
+    """
+    df = pd.read_csv(path, delimiter="," if task == "pepper" else ";")
+    if task == "pepper":
+        df["Timestamp"] = df["timestamp"]
+        df.set_index("Timestamp", inplace=True)
+        df.drop(columns=["timestamp"], inplace=True)
+    else:
+        df["Timestamp"] = pd.to_datetime(df[" Timestamp"].str.strip(),
+                                         format="%d/%m/%Y %I:%M:%S %p")
+        df.set_index("Timestamp", inplace=True)
+        df.drop(columns=[" Timestamp"], inplace=True)
     return df
 
-def run_pcmci(data, delay, link_assumptions=None):
-    pcmci = PCMCI(dataframe=pp.DataFrame(data), cond_ind_test=ParCorr())
-    results = pcmci.run_pcmci(tau_max=delay, pc_alpha=ALPHA, link_assumptions=link_assumptions)
 
-    return results
+# ================================================================
+#                     LEARN CAUSAL MODEL
+# ================================================================
+def learn_causal_model(normal_csv_path: str, save_path: str):
+    """
+    Learn the causal graph using PCMCI.
+    Tau_max is automatically computed from the dominant frequency.
+
+    Steps:
+        1️⃣ Load normal data
+        2️⃣ Filter top frequency components
+        3️⃣ Remove near-constant variables
+        4️⃣ Compute tau_max from max frequency
+        5️⃣ Run PCMCI
+        6️⃣ Save the model
+    """
+    print("Learning causal model...")
+
+    df = read_data(normal_csv_path, TASK)
+    n_train = int(TRAINING_FRAC * len(df))
+    train_vals = np.nan_to_num(df.values[:n_train, :])
+
+    # --- 1. Determine dominant frequencies (FFT) ---
+    MAX_FREQ_COMPONENTS = 5
+    freqs = []
+    for col in range(train_vals.shape[1]):
+        signal = train_vals[:, col]
+        if np.std(signal) < 1e-12:
+            continue
+        w = np.fft.fft(signal)
+        f = np.fft.fftfreq(len(w))
+        mods = np.abs(w)
+        main_freqs = [f[i] for i in np.argsort(mods)[::-1][:MAX_FREQ_COMPONENTS] if f[i] > 0]
+        freqs.extend(main_freqs)
+
+    # --- 2. Determine subsampling factor ---
+    subsample = 1
+    if freqs:
+        sorted_freq = np.sort(np.array(freqs))[::-1]
+        max_freq = sorted_freq[0]
+        for freq in sorted_freq:
+            if len([fr for fr in sorted_freq if fr < freq]) / len(sorted_freq) < 0.95:
+                max_freq = freq
+                break
+        subsample = max(1, int(np.floor(0.1 / max_freq)))
+
+    # --- 3. Remove near-constant variables ---
+    train_sub = train_vals[::subsample, :]
+    stds = np.std(train_sub, axis=0)
+    means = np.mean(train_sub, axis=0)
+    nonconst = np.where(stds > 0.01 * np.abs(means))[0]
+    if len(nonconst) == 0:
+        nonconst = np.arange(train_sub.shape[1])
+
+    # --- 4. Compute tau_max from dominant frequency ---
+    tau_max = max(1, int(np.round(1 / max_freq))) if freqs else 5
+    print(f"Computed tau_max = {tau_max} from dominant frequency {max_freq if freqs else 'N/A'}")
+
+    # TODO: --- 5. Run PCMCI ---
+
+    # --- 6. Save model for reuse ---
+    np.savez(save_path,
+             val_matrix=results["val_matrix"],
+             p_matrix=results["p_matrix"],
+             var=df.columns,
+             subsample=subsample,
+             nonconst=nonconst)
+    print(f"Saved causal model to {save_path}")
+    return results, subsample, nonconst, tau_max
 
 
+# ================================================================
+#                  OFFLINE COEFFICIENT FITTING
+# ================================================================
+def fit_normal_coeffs(normal_data: np.ndarray, causal_matrix: np.ndarray):
+    """
+    Compute offline (baseline) coefficients for each variable.
 
-end = 0
-start = 0
-has_ends = False
-tpos = []
-fpos = []
-tneg = []
-fneg = []
+    Visual:
+        X_t = sum_j (a_j * X_parent_j_(t-delay_j)) + bias
+        ------------------------------------------------
+        offline coefficients: learned on full normal dataset
+    """
+    indices = np.array(np.where(causal_matrix != 0))
+    fine_coeffs = {}
+    for var in np.unique(indices[1, :]):
+        # TODO: compute fine_coeffs[var]
 
-causal_model = "models/pepper_normal_07.npz"
-f = np.load(causal_model, allow_pickle=True)
-val_matrix = f["val_matrix"]
-p_matrix = f["p_matrix"]
-var = list(f["var"])
-subsample = int(f['subsample'])
-delay = np.shape(val_matrix)[2] - 1
-nonconst = f["nonconst"]
-
-normal_matrix = val_matrix * (p_matrix < ALPHA) * (abs(val_matrix) > np.mean(abs(val_matrix)))
-normal_p_matrix = p_matrix * (p_matrix < ALPHA) * (abs(val_matrix) > np.mean(abs(val_matrix)))
-
-#modify paths to dataset folders
-normal_df = read_preprocess_data("data/pepper_csv/normal.csv")
-attack_dfs = [read_preprocess_data("data/pepper_csv/WheelsControl.csv")]
-attack_dfs.append(read_preprocess_data("data/pepper_csv/JointControl.csv"))
-attack_dfs.append(read_preprocess_data("data/pepper_csv/LedsControl.csv"))
+    return fine_coeffs, indices
 
 
+# ================================================================
+#             ONLINE COEFFICIENTS & ERROR COMPUTATION
+# ================================================================
+def compute_online_errors(data: np.ndarray, fine_coeffs: dict,
+                          causal_matrix: np.ndarray, indices: np.ndarray):
+    """
+    Recompute coefficients online over a moving window and compute deviations.
 
-#PLOT CAUSAL GRAPH
-# pcmci = PCMCI(dataframe=pp.DataFrame(np.nan_to_num(normal_df.values[:, nonconst])), cond_ind_test=ParCorr())
-# # graph = pcmci.get_graph_from_pmatrix(p_matrix=normal_p_matrix, alpha_level=ALPHA, 
-# #         tau_min=0, tau_max=delay, link_assumptions=None)
-# normal_matrix[abs(normal_matrix) < 0.3] = 1 #remove weak links
-# graph = pcmci.get_graph_from_pmatrix(p_matrix=normal_matrix, alpha_level=0.99, 
-#         tau_min=0, tau_max=delay, link_assumptions=None)
-# tp.plot_graph(
-#     val_matrix=normal_matrix,
-#     graph=graph,
-#     var_names=f["var"][nonconst],
-#     link_colorbar_label='cross-MCI',
-#     node_colorbar_label='auto-MCI',
-#     show_autodependency_lags=False,
-#     arrow_linewidth=5,
-#     tick_label_size=10,
-#     link_label_fontsize=0
-# )
-# plt.show()
-#PLOT CAUSAL GRAPH
+    Visual:
+        Time t-3  t-2  t-1  [t]
+              |---- moving window ----|
+                      ↑ online regression
+        norm_agg[t,i] = ||online_coeffs - offline_coeffs||
+    """
+    max_time = data.shape[0] - causal_matrix.shape[2]
+    err = {}
+    norm_agg = np.zeros((max_time, len(np.unique(indices[1, :]))))
 
-#compute normal coeffs
-normal_data = normal_df.values[:int(TRAINING_FRAC*np.shape(normal_df.values)[0]), :]
-normal_data = normal_data[::subsample, nonconst]
-normal_data = np.nan_to_num(normal_data)
-normal_data_full = normal_df.values
-normal_data_full = normal_data_full[::subsample, nonconst]
-normal_data_full = np.nan_to_num(normal_data_full)
-indices = np.array(np.where(normal_matrix != 0)) # where the causal links are relevant
-causal_coeffs = dict() #for each variable key, store linear coeffs
-for var in np.unique(indices[1,:]):
-    #TODO: compute causal_coeffs from normal_data (i.e., TRAINING_FRAC of the dataset) via lstsq (least squares)
-    pass
-
-
-#NORMAL OUAD
-#compute online coeffs
-err = dict()
-max_time = np.shape(normal_data_full)[0] - np.shape(normal_matrix)[2]
-norm_agg = np.zeros((max_time, len(np.unique(indices[1,:]))))
-for j in range(0, max_time):
-    for i in range(len(np.unique(indices[1,:]))):
-        var = np.unique(indices[1,:])[i]
-        var_indices = [indices[:,k] for k in range(np.shape(indices)[1]) if indices[1,k] == var]
-        var_indices.sort(key= lambda a : a[-1])
-        stack_list = []
-        max_delay = var_indices[-1][2]
-        for el in var_indices:
-            stack_list.append(normal_data_full[max_delay-el[2] : j+np.shape(normal_matrix)[2]-el[2], el[0]])
-        stack_list.append(np.ones(j+np.shape(normal_matrix)[2]-max_delay))
-        coeffs = np.linalg.lstsq(np.column_stack(stack_list), normal_data_full[max_delay : j+np.shape(normal_matrix)[2], var])[0][:-1]
-        if var not in err.keys():
-            err[var] = np.zeros((max_time, len(var_indices)))
-        err[var][j, :] = (coeffs - causal_coeffs[var])
-        norm_agg[j,i] = np.linalg.norm(err[var][j, :])
-
-indices_error = []
-for i in range(np.shape(norm_agg)[1]):
-    var = np.unique(indices[1,:])[i]
-    var_indices = [indices[:,k] for k in range(np.shape(indices)[1]) if indices[1,k] == var]
-    for j in range(np.shape(err[var])[1]):
-        thresh = np.linalg.norm(err[var][:len(normal_data),j])
-        indices_error += list(np.where(abs(err[var][:,j]) > thresh)[0])
-
-fpos.append(len(np.unique(indices_error)))
-
-#ATTACK OUAD
-for q in range(len(attack_dfs)):
-    print("ANOMALY ", q)
-    dep_vars = dict()
-    dep_vars_value = dict()
-    #compute online coeffs
-    attack_data = attack_dfs[q].values
-    attack_data = attack_data[::subsample, nonconst]
-    attack_data = np.nan_to_num(attack_data)
-    max_time = np.shape(attack_data)[0] - np.shape(normal_matrix)[2]
-    norm_agg = np.zeros((max_time, len(np.unique(indices[1,:]))))
-    err_attack = dict()
-    for j in range(0, max_time):
-        for i in range(len(np.unique(indices[1,:]))):    
-            var = np.unique(indices[1,:])[i]
-            var_indices = [indices[:,k] for k in range(np.shape(indices)[1]) if indices[1,k] == var]
-            # var_indices.sort(key= lambda a : a[-1])
+    for t in range(max_time):
+        for i, var in enumerate(np.unique(indices[1, :])):
+            var_indices = [indices[:, k] for k in range(indices.shape[1]) if indices[1, k] == var]
+            var_indices.sort(key=lambda x: x[2])
             max_delay = var_indices[-1][2]
-            start_time = time.time()
-            stack_list = []
-            for el in var_indices:
-                stack_list.append(attack_data[max_delay-el[2] : j+np.shape(normal_matrix)[2]-el[2], el[0]])
-            stack_list.append(np.ones(j+np.shape(normal_matrix)[2]-max_delay))
-            coeffs = np.linalg.lstsq(np.column_stack(stack_list), attack_data[max_delay : j+np.shape(normal_matrix)[2], var])[0][:-1]
-            if var not in err_attack.keys():
-                err_attack[var] = np.zeros((max_time, len(var_indices)))
-            err_attack[var][j, :] = (coeffs - causal_coeffs[var])
-            norm_agg[j,i] = np.linalg.norm(err_attack[var][j, :])
 
-    start_index = 0
-    end_index = -1
-    main_vars = [] #print this to identify broken causal children
+            # Fit online coefficients up to time t
+            stack = [data[max_delay - el[2]: t + causal_matrix.shape[2] - el[2], el[0]]
+                     for el in var_indices]
+            stack.append(np.ones(t + causal_matrix.shape[2] - max_delay))
+
+            coeffs = np.linalg.lstsq(np.column_stack(stack),
+                                     data[max_delay: t + causal_matrix.shape[2], var],
+                                     rcond=None)[0][:-1]
+
+            # Store deviation
+            if var not in err:
+                err[var] = np.zeros((max_time, len(var_indices)))
+            err[var][t, :] = coeffs - fine_coeffs[var]
+            norm_agg[t, i] = np.linalg.norm(err[var][t, :])
+
+    return err, norm_agg
+
+
+# ================================================================
+#                        ANOMALY DETECTION
+# ================================================================
+def detect_anomalies(err_normal, err_attack, normal_data_len, normal):
+    """
+    Flag anomalies if online coefficients deviate significantly from offline baseline.
+
+    Threshold = 0.8 * norm of offline deviations.
+    """
     indices_error = []
-    for i in range(np.shape(norm_agg)[1]):
-        var = np.unique(indices[1,:])[i]
-        var_indices = [indices[:,k] for k in range(np.shape(indices)[1]) if indices[1,k] == var]
-        main_vars.append(f["var"][nonconst][var])
-        if f["var"][nonconst][var] not in dep_vars.keys():
-            dep_vars[f["var"][nonconst][var]] = []
-            dep_vars_value[f["var"][nonconst][var]] = []
-        #raise alarm
-        for j in range(np.shape(err_attack[var])[1]):
-            thresh = np.linalg.norm(err[var][:len(normal_data),j])
-            indices_error += list(np.where(abs(err_attack[var][int(start_index):int(end_index),j]) > thresh)[0])
-            dep_vars[f["var"][nonconst][var]].append(f["var"][nonconst][var_indices[j][0]])
-            dep_vars_value[f["var"][nonconst][var]].append(norm_agg[int(start_index):int(end_index),i])
-        
-    tpos.append(len(np.unique(indices_error)))
-    fneg.append(np.shape(err_attack[var][int(start_index):int(end_index),j])[0] - tpos[-1])    
+    for var in err_attack.keys():
+        for j in range(err_attack[var].shape[1]):
+            thresh = 0.8 * np.linalg.norm(err_normal[var][:normal_data_len, j])
+            if not normal:
+                indices_error += list(np.where(abs(err_attack[var][:, j]) > thresh)[0])
+            else:
+                indices_error += list(np.where(abs(err_attack[var][normal_data_len:, j]) > thresh)[0])
+    return len(np.unique(indices_error))
 
 
-    # MOST ANOMALOUS VARIABLES
-    dep_vars_value_aggregates = dict()
-    for k in dep_vars_value.keys():
-        if dep_vars_value[k] != []:
-            dep_vars_value_aggregates[k] = np.linalg.norm(np.array(dep_vars_value[k]))
-    # sort by aggregated error norm
-    dep_vars_value_aggregates = dict(sorted(dep_vars_value_aggregates.items(), key=lambda item: item[1], reverse=True))
 
-    dep_vars_keys = list(dep_vars_value_aggregates.keys())
-    for var_idx in range(len(dep_vars_keys)):
-        if var_idx > 0.1*len(dep_vars_keys):
-            break
-        if len(dep_vars[dep_vars_keys[var_idx]]) > 0:
-            print("AGGREGATE ERROR ", dep_vars_value_aggregates[dep_vars_keys[var_idx]])
-            print(dep_vars_keys[var_idx])
-            # print("DEP VARS ", dep_vars[dep_vars_keys[var_idx]])
-    print("===========================")
+# ================================================================
+#          FEATURE IMPORTANCE PLOTTING (SUBPLOTS)
+# ================================================================
+def plot_feature_importance_subplots(norm_agg_list, indices, nonconst, var_names, attack_names, top_frac=0.1):
+    """
+    Plot top anomalous variables per attack as barplots in subplots.
+    
+    Inputs:
+        norm_agg_list : list of np.ndarray
+            Aggregated online deviations for each attack (L2 norm over time)
+        indices       : np.ndarray
+            Indices of causal parents from offline coefficients
+        nonconst      : list/np.ndarray
+            Indices of non-constant variables
+        var_names     : list
+            Names of all variables
+        attack_names  : list
+            Names of attack datasets (for subplot titles)
+        top_frac      : float
+            Fraction of top variables to show
+    """
+    n_attacks = len(norm_agg_list)
+    fig, axes = plt.subplots(1, n_attacks, figsize=(6*n_attacks, 5), squeeze=False)
+    plt.suptitle("Top Anomalous Variables per Attack", fontsize=16)
 
-print("PRECISION")
-print(np.sum(tpos) / (np.sum(tpos)+np.sum(fpos)))
-print("RECALL")
-print(np.sum(tpos) / (np.sum(tpos)+np.sum(fneg)))
-print("F1")
-print(2 * np.sum(tpos) / (2*np.sum(tpos)+np.sum(fneg)+np.sum(fpos)))
+    for i, norm_agg_attack in enumerate(norm_agg_list):
+        # Compute aggregated L2 norm per variable
+        dep_vals = {var_names[nonconst[var]]: np.linalg.norm(norm_agg_attack[:, j])
+                    for j, var in enumerate(np.unique(indices[1, :]))}
+        # Sort descending
+        dep_sorted = dict(sorted(dep_vals.items(), key=lambda x: x[1], reverse=True))
+        top_n = max(1, int(top_frac * len(dep_sorted)))
+        top_items = list(dep_sorted.items())[:top_n]
+        top_vars, top_vals = zip(*top_items)
 
+        ax = axes[0, i]
+        ax.bar(top_vars, top_vals, color='salmon')
+        ax.set_xticklabels(top_vars, rotation=45, ha='right')
+        ax.set_ylabel("Aggregated Error (L2 Norm)")
+        ax.set_title(attack_names[i])
+
+    plt.tight_layout()
+    plt.show()
+
+
+# ================================================================
+#                         MAIN PIPELINE
+# ================================================================
+def main():
+    print(f"\n========== TASK: {TASK.upper()} ==========")
+
+    causal_path = os.path.join(PREFIX, f"{TASK}_normal_07.npz")
+
+    # 1️⃣ Learn or load causal model
+    if not os.path.exists(causal_path):
+        learn_causal_model(PREFIX + "pepper_csv/normal.csv", causal_path)
+
+    f = np.load(causal_path, allow_pickle=True)
+    val_matrix, p_matrix = f["val_matrix"], f["p_matrix"]
+    subsample, nonconst = int(f["subsample"]), f["nonconst"]
+
+    normal_matrix = val_matrix * (p_matrix < ALPHA) * (abs(val_matrix) > np.mean(abs(val_matrix)))
+
+    # 2️⃣ Load normal data
+    normal_df = read_data(PREFIX + "pepper_csv/normal.csv", TASK)
+    normal_data = np.nan_to_num(normal_df.values[:int(TRAINING_FRAC * len(normal_df))][::subsample, nonconst])
+    normal_data_full = np.nan_to_num(normal_df.values[::subsample, nonconst])
+
+    # 3️⃣ Offline coefficients
+    fine_coeffs, indices = fit_normal_coeffs(normal_data, normal_matrix)
+
+    # 4️⃣ Online deviations
+    err_normal, norm_agg_normal = compute_online_errors(normal_data_full, fine_coeffs, normal_matrix, indices)
+
+    # 5️⃣ Load and detect anomalies
+    attack_paths = [
+        PREFIX + "pepper_csv/WheelsControl.csv",
+        PREFIX + "pepper_csv/JointControl.csv",
+        PREFIX + "pepper_csv/LedsControl.csv"
+    ]
+    attack_dfs = [read_data(p, TASK) for p in attack_paths]
+
+    tpos, fpos, fneg = [], [], []
+
+    # False positives
+    fpos.append(detect_anomalies(err_normal, err_normal, len(normal_data), normal=True))
+
+    norm_agg_attacks = []
+    attack_names = []
+
+    for path, df_attack in zip(attack_paths, attack_dfs):
+        attack_name = os.path.basename(path)
+        attack_names.append(attack_name)
+        print(f"\n--- Analyzing anomaly: {attack_name} ---")
+
+        attack_data = np.nan_to_num(df_attack.values[::subsample, nonconst])
+        err_attack, norm_agg_attack = compute_online_errors(attack_data, fine_coeffs, normal_matrix, indices)
+        norm_agg_attacks.append(norm_agg_attack)
+
+        tp_count = detect_anomalies(err_normal, err_attack, len(normal_data), normal=False)
+        tpos.append(tp_count)
+        fneg.append(attack_data.shape[0] - tp_count)
+
+        # Top 10% variables with highest aggregated error
+        dep_vals = {f["var"][nonconst][var]: np.linalg.norm(norm_agg_attack[:, i])
+                    for i, var in enumerate(np.unique(indices[1, :]))}
+        dep_vals_sorted = dict(sorted(dep_vals.items(), key=lambda x: x[1], reverse=True))
+        top_n = max(1, int(0.1 * len(dep_vals_sorted)))
+        # print("Top 10% anomalous variables:")
+        # for i, (k, v) in enumerate(list(dep_vals_sorted.items())[:top_n]):
+        #     print(f"{k:<20} | Aggregate Error: {v:.3f}")
+        # print("========================================")
+
+    # 6️⃣ Metrics
+    precision = np.sum(tpos) / (np.sum(tpos) + np.sum(fpos))
+    recall = np.sum(tpos) / (np.sum(tpos) + np.sum(fneg))
+    f1 = 2 * np.sum(tpos) / (2 * np.sum(tpos) + np.sum(fpos) + np.sum(fneg))
+
+    print("\n========== METRICS ==========")
+    print(f"Precision: {precision:.3f}")
+    print(f"Recall:    {recall:.3f}")
+    print(f"F1 Score:  {f1:.3f}")
+    print("=============================\n")
+    
+    # ===== PLOT FEATURE IMPORTANCE FOR ALL ATTACKS =====
+    plot_feature_importance_subplots(norm_agg_attacks, indices, nonconst, f["var"], attack_names, top_frac=0.1)
+
+
+# ================================================================
+#                          RUN SCRIPT
+# ================================================================
+if __name__ == "__main__":
+    main()
