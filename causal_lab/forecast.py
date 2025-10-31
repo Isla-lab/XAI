@@ -94,7 +94,7 @@ def fit_causal_model(df, target_col=TARGET, tau_max=MAX_TAU):
 
     # Extract aligned true values
     pred = model.predict(target_idx)
-    true_matrix = model.get_test_array()
+    true_matrix = model.get_test_array(target_idx)
     if true_matrix.ndim == 1:
         true_test = true_matrix
     else:

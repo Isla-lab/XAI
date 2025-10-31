@@ -31,8 +31,9 @@ warnings.filterwarnings('ignore', category=ConstantInputWarning)
 # ================== GLOBAL CONFIG ==================
 ALPHA = 0.05
 TRAINING_FRAC = 0.7
-PREFIX = "C:\\Users\\User\\tigramite\\tigramite\\tutorials\\causal_discovery\\"
+PREFIX = "C:\\Users\\User\\XAI_solutions\\causal_lab\\pepper_csv\\"
 TASK = "pepper"
+MAX_FREQ_COMPONENTS = 5
 
 # ================================================================
 #                         DATA LOADING
@@ -76,46 +77,46 @@ def learn_causal_model(normal_csv_path: str, save_path: str):
     print("Learning causal model...")
 
     df = read_data(normal_csv_path, TASK)
-    n_train = int(TRAINING_FRAC * len(df))
-    train_vals = np.nan_to_num(df.values[:n_train, :])
+    normal_data = pp.DataFrame(np.nan_to_num(df.values))
+    #restrict to training_frac
+    normal_data.values[0] = normal_data.values[0][:int(TRAINING_FRAC*np.shape(normal_data.values[0])[0]), :]
+    # attack_data = pp.DataFrame(np.nan_to_num(attack_df.values))
 
-    # --- 1. Determine dominant frequencies (FFT) ---
-    MAX_FREQ_COMPONENTS = 5
-    freqs = []
-    for col in range(train_vals.shape[1]):
-        signal = train_vals[:, col]
-        if np.std(signal) < 1e-12:
-            continue
-        w = np.fft.fft(signal)
-        f = np.fft.fftfreq(len(w))
-        mods = np.abs(w)
-        main_freqs = [f[i] for i in np.argsort(mods)[::-1][:MAX_FREQ_COMPONENTS] if f[i] > 0]
-        freqs.extend(main_freqs)
+    frequencies = []
+    for index in range(np.shape(normal_data.values[0])[1]):
+        #the signal is made of continuous variables
+        if any([el for el in normal_data.values[0][:,index] if int(el)!=el]):
+            w = np.fft.fft(normal_data.values[0][:,index])
+            freqs = np.fft.fftfreq(len(w))
+            mods = abs(w)
+            max_indices = np.argsort(mods)[::-1][:MAX_FREQ_COMPONENTS]
+            main_freq = []
+            for i in max_indices:
+                freq = freqs[i]
+                main_freq.append(freq)
+            frequencies += main_freq
 
-    # --- 2. Determine subsampling factor ---
-    subsample = 1
-    if freqs:
-        sorted_freq = np.sort(np.array(freqs))[::-1]
-        max_freq = sorted_freq[0]
-        for freq in sorted_freq:
-            if len([fr for fr in sorted_freq if fr < freq]) / len(sorted_freq) < 0.95:
-                max_freq = freq
-                break
-        subsample = max(1, int(np.floor(0.1 / max_freq)))
+    # print(np.sort(frequencies)[::-1][:MAX_FREQ_COMPONENTS])
+    sorted_freq = np.sort([el for el in frequencies if el>0])[::-1]
+    for freq in sorted_freq:
+        if len([fr for fr in sorted_freq if fr < freq]) / len(sorted_freq) < 0.95:
+            max_freq = freq
+            sorted_freq = [s for s in sorted_freq if s <= max_freq]
+            break
 
-    # --- 3. Remove near-constant variables ---
-    train_sub = train_vals[::subsample, :]
-    stds = np.std(train_sub, axis=0)
-    means = np.mean(train_sub, axis=0)
-    nonconst = np.where(stds > 0.01 * np.abs(means))[0]
-    if len(nonconst) == 0:
-        nonconst = np.arange(train_sub.shape[1])
+    subsample = max(1, int(np.floor(1/10/max_freq)))
+    normal_data.values[0] = normal_data.values[0][::max(1, subsample), :]
+    nonconst = [idx for idx in range(np.shape(normal_data.values[0])[1]) if np.std(normal_data.values[0][:, idx]) > 0.01 * np.mean(normal_data.values[0][:, idx])]
+    nonconst_data = normal_data.values[0][:, nonconst]
+    for j in range(np.shape(nonconst_data)[1]):
+        nonconst_data[:,j] /= (np.max(nonconst_data[:,j]) - np.min(nonconst_data[:,j])) + np.min(nonconst_data[:,j])
+    print(np.shape(nonconst_data))
+    
+    # Evaluate links
+    tau_max = int(np.floor(max_freq / np.mean(np.unique(sorted_freq))))
+    print(tau_max)
 
-    # --- 4. Compute tau_max from dominant frequency ---
-    tau_max = max(1, int(np.round(1 / max_freq))) if freqs else 5
-    print(f"Computed tau_max = {tau_max} from dominant frequency {max_freq if freqs else 'N/A'}")
-
-    # TODO: --- 5. Run PCMCI ---
+    # TODO --- 5. Run PCMCI ---
 
     # --- 6. Save model for reuse ---
     np.savez(save_path,
@@ -126,6 +127,7 @@ def learn_causal_model(normal_csv_path: str, save_path: str):
              nonconst=nonconst)
     print(f"Saved causal model to {save_path}")
     return results, subsample, nonconst, tau_max
+
 
 
 # ================================================================
@@ -262,11 +264,14 @@ def plot_feature_importance_subplots(norm_agg_list, indices, nonconst, var_names
 def main():
     print(f"\n========== TASK: {TASK.upper()} ==========")
 
-    causal_path = os.path.join(PREFIX, f"{TASK}_normal_07.npz")
+    causal_path = os.path.join(PREFIX, f"{TASK}_normal.npz")
+    print(f"Causal model path: {causal_path}")
 
     # 1️⃣ Learn or load causal model
     if not os.path.exists(causal_path):
-        learn_causal_model(PREFIX + "pepper_csv/normal.csv", causal_path)
+        learn_causal_model(PREFIX + "normal.csv", causal_path)
+    else:
+        print("Causal model found, loading...")
 
     f = np.load(causal_path, allow_pickle=True)
     val_matrix, p_matrix = f["val_matrix"], f["p_matrix"]
@@ -275,7 +280,7 @@ def main():
     normal_matrix = val_matrix * (p_matrix < ALPHA) * (abs(val_matrix) > np.mean(abs(val_matrix)))
 
     # 2️⃣ Load normal data
-    normal_df = read_data(PREFIX + "pepper_csv/normal.csv", TASK)
+    normal_df = read_data(PREFIX + "normal.csv", TASK)
     normal_data = np.nan_to_num(normal_df.values[:int(TRAINING_FRAC * len(normal_df))][::subsample, nonconst])
     normal_data_full = np.nan_to_num(normal_df.values[::subsample, nonconst])
 
@@ -287,9 +292,9 @@ def main():
 
     # 5️⃣ Load and detect anomalies
     attack_paths = [
-        PREFIX + "pepper_csv/WheelsControl.csv",
-        PREFIX + "pepper_csv/JointControl.csv",
-        PREFIX + "pepper_csv/LedsControl.csv"
+        PREFIX + "WheelsControl.csv",
+        PREFIX + "JointControl.csv",
+        PREFIX + "LedsControl.csv"
     ]
     attack_dfs = [read_data(p, TASK) for p in attack_paths]
 
@@ -344,3 +349,6 @@ def main():
 # ================================================================
 if __name__ == "__main__":
     main()
+
+
+
