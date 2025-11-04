@@ -8535,7 +8535,7 @@ guess_value(100).
 %Then make a Python script to clean useless rules
 %Then copy paste the pruned s_m here and run
 %ILASP --version=4 -d ilasp_task.las
-%Finally pick the hypothesis with the least counterexamples (the one ABOVE the number of counterexamples)
+%Finally pick the hypothesis with the least counterexamples
 
 #maxv(3). %maximum number of variables per rule
 #maxhl(1). %maximum length of aggregate axioms. This will generate both 0{}1 and 1{}1.
