@@ -1,10 +1,19 @@
-Explainable AI Laboratory 2025
+Explainable AI Laboratory
 ====================================
 
 This repository contains the materials, exercises, and supplementary resources for the Explainable Artificial Intelligence (XAI) laboratory component of the course. 
+The code is intended to be run on an Ubuntu 22.04 machine (a virtual machine is also fine, e.g., with VirtualBox).
 
 ------------------------------------
-Setup Instructions
+Virtual Machine (VM) setup
+------------------------------------
+
+If Ubuntu 22.04 is not native on your machine:
+1. Follow the instructions here for Ubuntu VM setup on Virtual Box https://ubuntu.com/tutorials/how-to-run-ubuntu-desktop-on-a-virtual-machine-using-virtualbox#1-overview
+2. Download Ubuntu 22 OS image from here https://releases.ubuntu.com/jammy/
+
+------------------------------------
+System setup
 ------------------------------------
 
 To ensure full functionality of the laboratory exercises, please follow the steps below after cloning the repository.
@@ -47,12 +56,10 @@ You may confirm that the installation was successful by running:
 If both commands return version information, the setup has been completed successfully.
 
 
-Requirements
 ------------------------------------
-Additional requirements for each lab lesson will be added to the dedicated directory in a requirements.txt file. To install them, move to the file location and run the following command:
-``` bash
-pip install -r requirements.txt
-```
+Lab-specific requirements
+------------------------------------
+Additional requirements for each lab lesson will be added to the dedicated directory in a README file.
 
 ------------------------------------
 Troubleshooting and Support
