@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 install_script_path="$( cd "$(dirname "$0")" ; pwd -P )"
-target_install_path="${install_script_path}/src/bin"
+target_install_path="${install_script_path}"
 
 function install_binary {
   binary_url=$1
