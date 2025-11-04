@@ -1,6 +1,6 @@
 #include<incmode>.
 
-peg(a;b;c).
+peg(a;b;c;d).
 disk(1..4).
 init_on(1..4,a).
 goal_on(1..4,c).
@@ -21,5 +21,9 @@ blocked(D-1,P,t) :- blocked(D,P,t), disk(D).
 :- move(D,P,t), blocked(D-1,P,t).
 :- move(D,t), on(D,P,t-1), blocked(D,P,t).
 :- disk(D), not 1 { on(D,P,t) } 1.
+
+%:~ move(2,d,t). [1@1,t]
+%:~ move(D,d,t). [1@1,D,t]
+%:- move(D,d,t).
 
 #show move/3.
