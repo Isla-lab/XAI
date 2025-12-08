@@ -15,13 +15,18 @@ from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedul
 from stable_baselines3.common.utils import get_linear_fn, get_parameters_by_name, polyak_update
 from stable_baselines3.dqn.policies import CnnPolicy, DQNPolicy, MlpPolicy, MultiInputPolicy, QNetwork
 
+
+
 SelfDQN = TypeVar("SelfDQN", bound="SR_DQN")
 
 
 class SR_DQN(OffPolicyAlgorithm):
     """
-    SR-DQN Algorithm
-    Implementation based on Deep Q-Network (DQN) from Stable Baselines 
+    Deep Q-Network (DQN)
+
+    Paper: https://arxiv.org/abs/1312.5602, https://www.nature.com/articles/nature14236
+    Default hyperparameters are taken from the Nature paper,
+    except for the optimizer and learning rate that were taken from Stable Baselines defaults.
 
     :param policy: The policy model to use (MlpPolicy, CnnPolicy, ...)
     :param env: The environment to learn from (if registered in Gym, can be str)
@@ -48,7 +53,6 @@ class SR_DQN(OffPolicyAlgorithm):
     :param exploration_fraction: fraction of entire training period over which the exploration rate is reduced
     :param exploration_initial_eps: initial value of random action probability
     :param exploration_final_eps: final value of random action probability
-    :param conf_level: confidence level of the symbolic policy
     :param max_grad_norm: The maximum value for the gradient clipping
     :param stats_window_size: Window size for the rollout logging, specifying the number of episodes to average
         the reported success rate, mean episode length, and mean reward over
@@ -92,7 +96,6 @@ class SR_DQN(OffPolicyAlgorithm):
         exploration_fraction: float = 0.1,
         exploration_initial_eps: float = 1.0,
         exploration_final_eps: float = 0.05,
-        conf_level : float = 0.5,
         random_exploration_treshold: float = 0.1,
         max_grad_norm: float = 10,
         stats_window_size: int = 100,
@@ -101,6 +104,8 @@ class SR_DQN(OffPolicyAlgorithm):
         verbose: int = 0,
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
+        boost_exp: bool = False,
+        conf_level: float = 0.8,
         _init_setup_model: bool = True,
     ) -> None:
         super().__init__(
@@ -132,7 +137,8 @@ class SR_DQN(OffPolicyAlgorithm):
         self.exploration_initial_eps = exploration_initial_eps
         self.exploration_final_eps = exploration_final_eps
         self.exploration_fraction = exploration_fraction
-        self.conf_level = conf_level
+
+        self.random_exploration_treshold = random_exploration_treshold
 
         self.target_update_interval = target_update_interval
         # For updating the target network with multiple envs:
@@ -140,7 +146,8 @@ class SR_DQN(OffPolicyAlgorithm):
         self.max_grad_norm = max_grad_norm
         # "epsilon" for the epsilon-greedy exploration
         self.exploration_rate = 0.0
-
+        self.boost_exp = boost_exp
+        self.conf_level = conf_level
         if _init_setup_model:
             self._setup_model()
 
@@ -247,14 +254,24 @@ class SR_DQN(OffPolicyAlgorithm):
             (used in recurrent policies)
         """
         if not deterministic and np.random.rand() < self.exploration_rate:  
-            if self.policy.is_vectorized_observation(observation):
-                if isinstance(observation, dict):
-                    n_batch = observation[list(observation.keys())[0]].shape[0]
+            if self.boost_exp:
+                if self.policy.is_vectorized_observation(observation):
+                    if isinstance(observation, dict):
+                        n_batch = observation[list(observation.keys())[0]].shape[0]
+                    else:
+                        n_batch = observation.shape[0]
+                    action = np.array([self._get_random_action(observation) for _ in range(n_batch)])
                 else:
-                    n_batch = observation.shape[0]
-                action = np.array([self._get_suggested_action(observation) for _ in range(n_batch)])
+                    action = self._get_random_action(observation)
             else:
-                action = np.array(self._get_suggested_action(observation))
+                if self.policy.is_vectorized_observation(observation):
+                    if isinstance(observation, dict):
+                        n_batch = observation[next(iter(observation.keys()))].shape[0]
+                    else:
+                        n_batch = observation.shape[0]
+                    action = np.array([self.action_space.sample() for _ in range(n_batch)])
+                else:
+                    action = np.array(self.action_space.sample())
         else:
             action, state = self.policy.predict(observation, state, episode_start, deterministic)
         return action, state
@@ -284,50 +301,117 @@ class SR_DQN(OffPolicyAlgorithm):
         state_dicts = ["policy", "policy.optimizer"]
 
         return state_dicts, []
-
-
-    def _get_suggested_action(self, observed_img) -> List[int]:
-        observables = self._get_observables(observed_img)
-        # Observables returned as an array of tuples,
-        # each containing the string representing the name of the predicate and an array of arguments:
-        #  ("key", [color, offset_x, offset_y]), where offset_x, offset_y represent the relative distance wrt the agent
-        #  ("door", [color, offset_x, offset_y])
-        #  ("wall", [offset_x, offset_y])
-        #  ("goal", [offset_x, offset_y])
-        #  ("carryingKey", [color])
-        #  (door_state, [color]), where door_state can be 'open', 'closed', or 'locked'
-
-        actions = [] # POPULATE THE SET WITH THE ACTIONS SUGGESTED BY THE RULES
-        # Remember to map the high-level rules below to the actions implemented in the environment!
-        #   pickup(X) :- key(X), samecolor(X,Y), door(Y), notcarrying       Hint: must predicates (e.g. samecolor(X,Y)) must be derived!
-        #   open(X) :- door(X), locked(X), key(Z), carryingKey(Z), samecolor(X,Z)
-        #   goto :- goal(X), unlocked
-        # You can check the environment actions here: https://minigrid.farama.org/environments/minigrid/DoorKeyEnv/#action-space
-        # Hint: the actions marked as 'unused' are, in fact, useless, but the agent could still perform them
-        weights = None # Assign weights to the actions according to self.conf_level (value in [0,1] that states how much we trust the rules)
-        return random.choices(list(range(self.env.action_space.n)), weights, k=1) 
     
-    def _get_observables(self, img):
-        import numpy as np
+    def _get_suggested_action(self, observed_img) -> List[int]:
         from minigrid.core.constants import IDX_TO_COLOR
-        DOOR_STATES = ['open', 'closed', 'locked']
-        obs = []
-        view_size = 7
-        img = np.asarray(img[0]).reshape((view_size,view_size,3))
-        for i in range(view_size):
-            for j in range(view_size):
-                item = img[i][j]
-                offset_x = i - int((view_size - 1)/2)
-                offset_y = abs(j - (view_size - 1))
-                if item[0] == 5:
-                    obs.append(("key", [IDX_TO_COLOR.get(item[1]), offset_x, offset_y]))
-                    if i == ((view_size - 1)/2) and j == (view_size - 1):
-                        obs.append(("carryingKey", [IDX_TO_COLOR.get(item[1])]))
-                elif item[0] == 4:
-                    obs.append(("door", [IDX_TO_COLOR.get(item[1]), offset_x, offset_y]))
-                    obs.append((f"{DOOR_STATES[2]}", [IDX_TO_COLOR.get(item[1])]))
-                elif item[0] == 8:
-                    obs.append(("goal", [offset_x, offset_y]))
-                elif item[0] == 2:
-                    obs.append(("wall", [offset_x, offset_y]))
-        return obs
+
+        STATE_TO_IDX = {
+            "open": 0,
+            "closed": 1,
+            "locked": 2,
+        }
+
+        IDX_TO_STATE = dict(zip(STATE_TO_IDX.values(), STATE_TO_IDX.keys()))
+
+        actions = set()
+        carrying_key_color = None
+        locked = True 
+        door_color = None
+        door_x = None
+        door_y = None
+        goal_x = None
+        has_wall_left = False
+        has_wall_right = False
+        has_wall_forward = False
+        keys_l = set()
+        keys_r = set()
+        keys_f = set() 
+        key_in_front = False
+        observed_img = observed_img[0]
+        observed_img = np.asarray(observed_img).reshape((7, 7, 3))
+        for i in range(7):
+            for j in range(7):
+                item = observed_img[i][j]
+                offset_x = i - 3  
+                offset_y = j - 6
+                if item[0] == 5: 
+                    color = IDX_TO_COLOR[item[1]]
+                    if offset_x == 0:
+                        if offset_y == 0:
+                            carrying_key_color = color
+                        elif offset_y == 1:
+                            key_in_front = True
+                    elif offset_x < 0:
+                        keys_l.add(color)
+                    elif offset_x > 0:
+                        keys_r.add(color)
+                    if offset_y > 0:
+                        keys_f.add(color)
+                elif item[0] == 4:  
+                    door_color =  IDX_TO_COLOR[item[1]]
+                    locked = True if IDX_TO_STATE[item[2]] == 'locked' else False
+                    door_x = offset_x
+                    door_y = offset_y
+                elif item[0] == 2:  
+                    if offset_x == -1:
+                        has_wall_left = True
+                    if offset_x == 1:
+                        has_wall_right = True
+                    if offset_y == 1:  
+                        has_wall_forward = True  
+                elif item[0] == 8: 
+                    goal_x = offset_x
+        if not locked:
+            if goal_x:
+                if goal_x == 0 and not has_wall_forward:
+                    actions.add(2)
+                elif goal_x > 0 and not has_wall_right:
+                    actions.add(1)
+                elif goal_x < 0 and not has_wall_left:
+                    actions.add(0)
+        elif not carrying_key_color:
+            if door_color:
+                if door_color in keys_l:
+                    actions.add(0)
+                elif door_color in keys_r:
+                    actions.add(1)
+                elif door_color in keys_f:
+                    actions.add(2)
+            else:
+                if keys_l and not has_wall_left:
+                    actions.add(0) 
+                if keys_r and not has_wall_right:
+                    actions.add(1)
+                if keys_f and not has_wall_forward:
+                    actions.add(2)
+        elif carrying_key_color == door_color:
+            if door_x == 0 and not has_wall_forward:
+                actions.add(2)
+            elif door_x > 0 and not has_wall_right:
+                actions.add(1)
+            elif door_x < 0 and not has_wall_left:
+                actions.add(0)
+        elif door_color and carrying_key_color != door_color:
+            actions.add(4)
+        elif key_in_front and carrying_key_color == door_color:
+            actions.add(3)
+        elif carrying_key_color == door_color and door_y == 1 and door_x == 0:
+            actions.add(5)
+        return actions
+        
+
+
+    def _get_action(self, qvals):
+        with th.no_grad():
+            actions = qvals.argmax(axis=1)
+        return actions.cpu().numpy().reshape((-1, *self.action_space.shape))  # type: ignore[misc, assignment]
+    
+    def _get_random_action(self, observation):
+        actions = self._get_suggested_action(observation) # resurns the set of actions suggested by the symbolic heuristics
+
+        # assign weight equal to conf_level to suggested actions, and 1-conf_level to others
+        # normalize weights and sample action 
+        # if no suggested action, sample from uniform distribution
+
+        return 0
+      
