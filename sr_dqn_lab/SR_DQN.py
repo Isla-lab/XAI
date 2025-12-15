@@ -407,7 +407,7 @@ class SR_DQN(OffPolicyAlgorithm):
         return actions.cpu().numpy().reshape((-1, *self.action_space.shape))  # type: ignore[misc, assignment]
     
     def _get_random_action(self, observation):
-        actions = self._get_suggested_action(observation) # resurns the set of actions suggested by the symbolic heuristics
+        actions = self._get_suggested_action(observation) # returns the set of actions suggested by the symbolic heuristics
 
         # assign weight equal to conf_level to suggested actions, and 1-conf_level to others
         # normalize weights and sample action 
