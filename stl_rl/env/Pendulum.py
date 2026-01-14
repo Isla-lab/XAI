@@ -155,8 +155,7 @@ class Pendulum(gym.Env):
         if self.render_mode == "human":
             self.render()
 
-        # costs = sum of costs
-        return self._get_obs(np.array([newth, newthdot]), u), -costs, False, False, {
+        return self._get_obs(np.array([newth, newthdot]), u), reward, False, False, {
             "cost_thetadot": cost_thetadot,
             "cost_torque": cost_torque,
             "rho_thetadot": rho_thetadot,
