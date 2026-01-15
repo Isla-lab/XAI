@@ -2,6 +2,7 @@ import os
 import gymnasium as gym
 import minigrid
 import numpy as np
+import minigrid
 import argparse
 import matplotlib.pyplot as plt
 from stable_baselines3 import DQN
